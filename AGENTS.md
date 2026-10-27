@@ -176,6 +176,9 @@ ideas that need a launcher change or a new dependency go to an issue first, with
 
 ## Handover: this checkout's TV (Sony BRAVIA BF1), local customisations
 
+**Git: never commit, tag or push in this checkout.** The person does all git operations; give them the exact
+commands to run instead (their rule, 2026-10-27). Edit files, build and install as usual.
+
 Local work for one person's TV, not upstream material: the launcher changes below are a heavy restyle with some
 changed defaults, which the rules above route to a fork (`SHOWCASE.md`), so do not open a PR from this tree as is.
 The new look is switched on by the `aerial-glass` theme only; every new key is off by default.
