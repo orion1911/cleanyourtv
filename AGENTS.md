@@ -232,6 +232,13 @@ look. The table is the state the person last approved.
 Tile shadow (`TileShadow`): light at rest, it follows the zoom and lift and deepens to its focused strength; the
 Holder invalidates the item on each animation frame. Unfocused logos are 25% dimmer.
 
+### Version 1 (restore point, 2026-10-27 16:40)
+
+The approved state is git tag **`tv-bf1-v1`** on branch `tv-bf1`, with a backup in `backup\v1\` (gitignored): the
+installed launcher and Weather APKs (md5-verified against the TV), the theme with its wallpapers, a source zip, the
+TV's settings snapshot (`tv-state-v1.txt`) and `RESTORE-v1.md`, which reinstalls Version 1 with or without a build.
+Before changing anything that the person approved, say what will change; to undo, follow `RESTORE-v1.md`.
+
 ### Session notes (2026-10-27 afternoon)
 
 - Installed: the Weather add-on (with `NowProvider`), the launcher with `WeatherWidget`, the compact drawer, and the
