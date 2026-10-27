@@ -2,6 +2,7 @@ package com.gathin.tvhome;
 
 import android.animation.ArgbEvaluator;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -14,7 +15,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.TextClock;
 
 import java.io.File;
 import java.time.LocalDateTime;
@@ -62,11 +65,25 @@ final class ClockScene {
     private Map<String, Set<String>> moods;
     private String latitude, longitude;
 
+    /**
+     * screensaver_home: the screensaver is Home without its tiles and buttons. Home's clock style at Home's place,
+     * still; the wallpaper as Home shows it (its own dim, its colour depth), changing with a crossfade.
+     */
+    private boolean homeMode;
+    private final View root;
+    /** screensaver_home: the next picture fades in here, over ambient. */
+    private final ImageView ambientNext;
+    private Bitmap.Config wallpaperConfig = Bitmap.Config.RGB_565;
+    /** WallpaperPlayer's rotation state: screensaver_home writes each change back, so Home wakes on the same picture. */
+    private SharedPreferences rotationPrefs;
+
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            moveClock();
-            shiftGlow();
+            if (!homeMode) {
+                moveClock();
+                shiftGlow();
+            }
             advanceWallpaper();
             handler.postDelayed(this, MOVE_MS);
         }
@@ -74,6 +91,8 @@ final class ClockScene {
 
     /** root is the inflated dream_clock layout. */
     ClockScene(View root) {
+        this.root = root;
+        ambientNext = root.findViewById(R.id.dreamAmbientNext);
         content = root.findViewById(R.id.dreamContent);
         ambient = root.findViewById(R.id.dreamAmbient);
         glow = new GradientDrawable();
@@ -85,7 +104,27 @@ final class ClockScene {
         setGlow(PALETTE[colorIndex]);
     }
 
+    /** screensaver_home is on: ClockDream keeps the screen at full brightness so it matches Home. */
+    boolean homeMode() {
+        return homeMode;
+    }
+
     void start() {
+        if (homeMode) {
+            // Exactly where Home's clock is (its header's padding, the greeting hidden) and visible at once: as the
+            // screensaver fades in over Home, only the tiles and the top buttons appear to go.
+            float dp = content.getResources().getDisplayMetrics().density;
+            content.animate().cancel();
+            content.setAlpha(1f);
+            content.setX(56 * dp);
+            content.setY(26 * dp);
+            handler.removeCallbacks(tick);
+            handler.postDelayed(tick, MOVE_MS);
+            // Decoded right here, as Home's first picture is: fading in over Home with a black frame and the picture
+            // popping in later would look like the TV switching off.
+            if (wallpaperFile != null && !wallpaperShown) showWallpaperNow();
+            return;
+        }
         content.setAlpha(0f);
         content.post(() -> {
             placeClock();
@@ -99,6 +138,7 @@ final class ClockScene {
     void stop() {
         handler.removeCallbacksAndMessages(null);   // the tick and any glow steps still queued
         content.animate().cancel();
+        ambientNext.animate().cancel();
         wallpaperGeneration++;   // a decode still running must not attach its picture to a stopped scene
     }
 
@@ -116,7 +156,9 @@ final class ClockScene {
         } catch (RuntimeException e) {
             return;
         }
-        if (!cfg.clockWallpaper) {
+        homeMode = cfg.screensaverHome;
+        if (homeMode) setUpHome(ctx, cfg);
+        if (!cfg.clockWallpaper && !homeMode) {
             // clock_glow false: plain black behind the clock (OLED); the clock itself still moves every minute.
             if (!cfg.clockGlow) {
                 wallpaperShown = true;   // also stops the glow's colour cycle
@@ -139,13 +181,71 @@ final class ClockScene {
             // Home only rotates while it is visible, so the screensaver carries the rotation on
             // itself; without this it holds one picture for as long as it is up.
             rotationMs = cfg.wallpaperRotationMinutes * 60_000L;
+            if (homeMode) {
+                // Carry on Home's timing, not a fresh interval: the picture has already been up since "changed".
+                rotationPrefs = ctx.getSharedPreferences("wallpaper_rotation", Context.MODE_PRIVATE);
+                long changed = rotationPrefs.getLong("changed", 0);
+                long up = System.currentTimeMillis() - changed;
+                if (current != null && changed > 0 && up > 0) shownMs = Math.min(up, rotationMs);
+            }
             order = cfg.wallpaperOrder;
             moods = cfg.wallpaperMoods;
             latitude = moods.isEmpty() ? "" : ctx.getString(R.string.latitude);
             longitude = moods.isEmpty() ? "" : ctx.getString(R.string.longitude);
         }
-        wallpaperShade = (cfg.clockWallpaperDim * 255 / 100) << 24;
+        // screensaver_home: Home's own dim (wallpaper_dim) and colour depth, so the picture does not change as the
+        // screensaver takes over; otherwise the screensaver's darker clock_wallpaper_dim.
+        int dim = homeMode ? cfg.wallpaperDim : cfg.clockWallpaperDim;
+        wallpaperShade = (dim * 255 / 100) << 24;
+        if (homeMode && cfg.wallpaperTrueColor) wallpaperConfig = Bitmap.Config.ARGB_8888;
         wallpaperRes = ctx.getResources();
+    }
+
+    /** screensaver_home: Home's clock style (HomeClockStyle) and margins, no glow, Home's background colour behind. */
+    private void setUpHome(Context ctx, Config cfg) {
+        float dp = ctx.getResources().getDisplayMetrics().density;
+        TextClock clock = root.findViewById(R.id.dreamClock);
+        TextClock ampm = root.findViewById(R.id.dreamAmpm);
+        TextClock date = root.findViewById(R.id.dreamDate);
+        HomeClockStyle.apply(ctx, clock, ampm, date);
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) date.getLayoutParams();
+        lp.topMargin = Math.round(HomeClockStyle.DATE_GAP_DP * dp);
+        lp.setMarginStart(0);
+        date.setLayoutParams(lp);
+        ViewGroup.MarginLayoutParams alp = (ViewGroup.MarginLayoutParams) ampm.getLayoutParams();
+        alp.setMarginStart(Math.round(6 * dp));
+        ampm.setLayoutParams(alp);
+        ambient.setBackground(new ColorDrawable(cfg.backgroundColor));
+    }
+
+    /** screensaver_home: the first picture, decoded on this thread so the screensaver's first frame has it. */
+    private void showWallpaperNow() {
+        DisplayMetrics dm = wallpaperRes.getDisplayMetrics();
+        Bitmap bmp = decode(wallpaperFile, dm.widthPixels, dm.heightPixels, wallpaperConfig);
+        if (bmp == null) {
+            loadWallpaper();   // unreadable here too: the background colour stays, as on Home
+            return;
+        }
+        wallpaperShown = true;
+        ambient.setBackground(null);
+        ambient.setImageDrawable(picture(wallpaperRes, bmp, wallpaperShade));
+    }
+
+    private static Drawable picture(Resources res, Bitmap bmp, int shade) {
+        Drawable bitmap = new BitmapDrawable(res, bmp);
+        return shade == 0 ? bitmap : new LayerDrawable(new Drawable[]{bitmap, new ColorDrawable(shade)});
+    }
+
+    /** screensaver_home: the next picture fades in over the current one (1.5 s, as on Home), then replaces it. */
+    private void crossfade(Drawable next) {
+        ambientNext.animate().cancel();
+        ambientNext.setImageDrawable(next);
+        ambientNext.setAlpha(0f);
+        ambientNext.animate().alpha(1f).setDuration(1500).withLayer().withEndAction(() -> {
+            ambient.setImageDrawable(next);
+            ambientNext.setAlpha(0f);
+            ambientNext.setImageDrawable(null);
+        }).start();
     }
 
     private void loadWallpaper() {
@@ -155,8 +255,9 @@ final class ClockScene {
         DisplayMetrics dm = res.getDisplayMetrics();
         int w = dm.widthPixels, h = dm.heightPixels;
         int generation = ++wallpaperGeneration;
+        Bitmap.Config config = wallpaperConfig;
         new Thread(() -> {
-            Bitmap bmp = decode(file, w, h);
+            Bitmap bmp = decode(file, w, h, config);
             if (bmp == null) return;
             handler.post(() -> {
                 if (generation != wallpaperGeneration || wallpaperShown) {
@@ -166,15 +267,19 @@ final class ClockScene {
                 wallpaperShown = true;
                 // As the image, not the background: a background is stretched to the view, so a picture of
                 // another shape than the screen would be distorted. centerCrop scales and crops it like Home.
-                ambient.setBackground(null);
-                ambient.setImageDrawable(new LayerDrawable(new Drawable[]{
-                        new BitmapDrawable(res, bmp), new ColorDrawable(shade)}));
+                Drawable next = picture(res, bmp, shade);
+                if (homeMode && ambient.getDrawable() != null) {
+                    crossfade(next);
+                } else {
+                    ambient.setBackground(null);
+                    ambient.setImageDrawable(next);
+                }
             });
         }, "clock-wallpaper").start();
     }
 
     /** WallpaperPlayer's decode: sampled and scaled down to cover the screen, never bigger than 4K. */
-    private static Bitmap decode(File file, int screenW, int screenH) {
+    private static Bitmap decode(File file, int screenW, int screenH, Bitmap.Config config) {
         try {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inJustDecodeBounds = true;
@@ -191,7 +296,7 @@ final class ClockScene {
                 options.inDensity = scale[0];
                 options.inTargetDensity = scale[1];
             }
-            options.inPreferredConfig = Bitmap.Config.RGB_565;
+            options.inPreferredConfig = config;
             return BitmapFactory.decodeFile(file.getPath(), options);
         } catch (Exception | OutOfMemoryError failure) {
             return null;
@@ -209,6 +314,11 @@ final class ClockScene {
         File next = WallpaperRotation.pick(playable(), wallpaperFile.getName(), order, random);
         if (next.equals(wallpaperFile)) return;   // a mood group of one
         wallpaperFile = next;
+        if (rotationPrefs != null) {
+            // Home reads the same record when it comes back, so it wakes on this picture instead of an older one.
+            rotationPrefs.edit().putString("image", next.getName())
+                    .putLong("changed", System.currentTimeMillis()).apply();
+        }
         wallpaperShown = false;
         loadWallpaper();
     }

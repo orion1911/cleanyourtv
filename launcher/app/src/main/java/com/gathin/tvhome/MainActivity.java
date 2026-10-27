@@ -67,6 +67,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.PopupWindow;
+import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -110,6 +111,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     static int COLUMNS = 4;
     private boolean rtlAppGrid;
     private static final long MINUTE_MS = 60_000L;
+    /** square_tiles in a single row: the grid's bottom padding, so the row can sit low on the screen. */
+    private static final float SQUARE_BOTTOM_DP = 8f;
     private static final long STATS_MS = 10_000L;
     /**
      * 2025-01-01. TVs without a clock battery boot at the epoch (08:00 in China) and keep it until network
@@ -406,6 +409,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         reducedMotion = cfg.reducedMotion;
         dockRow = cfg.dockRow;
         singleRow = cfg.singleRow;
+        AppAdapter.squareTiles = cfg.squareTiles;   // before the grid measures its first tile
         focusOvershoot = cfg.focusOvershoot;
         festival = cfg.festival;
         festive = festival.active(LocalDate.now());
@@ -501,7 +505,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         lunarOffset = Lunar.offsetFor(cfg.lunarUtcOffset, Locale.getDefault());
         if (lunar) lunarDate.setVisibility(View.VISIBLE);
         greetingName = cfg.greetingName;
-        if (cfg.dateBelowClock) moveDateBelowClock();
+        if (cfg.dateBelowClock || cfg.clockLarge) moveDateBelowClock();
+        if (cfg.clockLarge) applyLargeClock();
         if (shamsi) {
             shamsiDate.setVisibility(View.VISIBLE);
             TextView date = findViewById(R.id.date);
@@ -602,6 +607,35 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         Order savedOrder = Order.load(Order.file(this));
         adapter.setSavedOrder(Order.ranks(savedOrder, dockApps), Order.docked(savedOrder, dockApps));
         grid.setAdapter(adapter);
+        if (singleRow && cfg.squareTiles) {
+            // The row as on an ambient home screen: its first tile starts under the clock's left edge (each tile sits
+            // centred in its column, so the grid moves left by that inset), and only a small margin stays under the
+            // focused name, so the row can sit low (see the padding line below).
+            int screenW = getResources().getDisplayMetrics().widthPixels;
+            float inner = screenW - 112 * density - 10 * density;   // the header's padding both sides, the grid's end padding
+            int inset = Math.round(inner / COLUMNS * (1f - AppAdapter.SQUARE_SHARE) / 2f);
+            grid.setPaddingRelative(0, grid.getPaddingTop(), grid.getPaddingEnd(), Math.round(SQUARE_BOTTOM_DP * density));
+            ViewGroup.MarginLayoutParams glp = (ViewGroup.MarginLayoutParams) grid.getLayoutParams();
+            glp.setMarginStart(-inset);
+            grid.setLayoutParams(glp);
+            // The first tile's zoom now reaches a little past the grid's container on the left.
+            ((ViewGroup) grid.getParent()).setClipChildren(false);
+            // At most COLUMNS tiles show; fewer than that sit centred on the screen. An offset before the first tile,
+            // not padding: the tiles' size follows the grid's inner width, which padding would shrink.
+            grid.addItemDecoration(new RecyclerView.ItemDecoration() {
+                @Override
+                public void getItemOffsets(@NonNull Rect out, @NonNull View view, @NonNull RecyclerView parent,
+                                           @NonNull RecyclerView.State state) {
+                    int count = state.getItemCount();
+                    if (parent.getChildAdapterPosition(view) != 0 || count <= 0 || count >= COLUMNS) return;
+                    float cell = (parent.getWidth() - parent.getPaddingLeft() - parent.getPaddingRight()) / (float) COLUMNS;
+                    int[] at = new int[2];
+                    parent.getLocationInWindow(at);
+                    int screenW = getResources().getDisplayMetrics().widthPixels;
+                    out.left = Math.max(0, Math.round((screenW - count * cell) / 2f - at[0] - parent.getPaddingLeft()));
+                }
+            });
+        }
 
         // tvOS layout: push the dock row towards the bottom of the screen, leaving room for
         // rows_below_dock grid rows under it; the rest of the grid stays below until you press Down.
@@ -625,7 +659,17 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (!MainActivity.this.dockRow) want = (int) (AppAdapter.TOP_ROOM_DP * density);
             // A single row never shows the names under its tiles (the title above the row names the app), so the
             // 7dp gap and 22dp label item_app.xml keeps for them would only lift the row: sit it that much lower.
-            if (singleRow && !cfg.alwaysShowNames) want += (int) (29 * density);
+            // With dock_title off the focused tile shows its own name there, so the row keeps that room.
+            if (singleRow && !cfg.alwaysShowNames && cfg.dockTitle) want += (int) (29 * density);
+            // square_tiles: the row sits as low as its item (with the dock offsets) allows above the small bottom
+            // padding, so the tiles end near 89% of the screen and the focused name just under them.
+            if (singleRow && cfg.squareTiles) {
+                want = Math.max(shelfClearance, h - dockRow - (int) (SQUARE_BOTTOM_DP * density));
+                // Only COLUMNS slots show: a tile past the last one waits off the row until the row scrolls to it,
+                // instead of peeking in at the screen's edge. A little room on the left for the first tile's zoom.
+                Rect clip = new Rect(-(int) (8 * density), -h, (r - l) - grid.getPaddingRight(), 2 * h);
+                if (!clip.equals(grid.getClipBounds())) grid.setClipBounds(clip);
+            }
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
                 // A vertical grid parks the dock on the new padding line by scrolling (onTileFocused); a sideways
@@ -735,6 +779,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         });
         btnLibraryTop.setVisibility(cfg.libraryButton && cfg.appLibrary ? View.VISIBLE : View.GONE);
         addTopBarApps(cfg.topBarApps, cfg.launchActions);
+        if (cfg.notificationsButton) addBell();
         iconOnlyButtons = cfg.iconOnlyButtons;
         topMenu = cfg.topMenu;
         wifiIconOnly = iconOnlyButtons && cfg.wifiLabelWidth <= 0;
@@ -940,6 +985,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onResume() {
         super.onResume();
+        updateBell();   // notifications_button: anything read or dismissed while away
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
             recreate();
@@ -1213,6 +1259,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (GuardRevival.onChange == bellListener) GuardRevival.onChange = null;
         unregisterReceiver(packageReceiver);
         wallpaperPlayer.close();
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
@@ -2311,6 +2358,26 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         clockColumn.addView(column, clockColumn.indexOfChild(clockRow) + 1, lp);
     }
 
+    /**
+     * clock_large: the header as on an ambient home screen (HomeClockStyle, shared with the screensaver), the date
+     * tucked under the digits, and the top buttons level with the top of the clock instead of its bottom line.
+     */
+    private void applyLargeClock() {
+        TextClock date = findViewById(R.id.date);
+        HomeClockStyle.apply(this, findViewById(R.id.clock), findViewById(R.id.ampm), date);
+        View column = (View) date.getParent();
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) column.getLayoutParams();
+        lp.topMargin = Math.round(HomeClockStyle.DATE_GAP_DP * density);
+        column.setLayoutParams(lp);
+        View buttons = findViewById(R.id.topButtons);
+        RelativeLayout.LayoutParams tlp = (RelativeLayout.LayoutParams) buttons.getLayoutParams();
+        tlp.removeRule(RelativeLayout.ALIGN_BOTTOM);
+        tlp.addRule(RelativeLayout.ALIGN_TOP, R.id.leftBlock);
+        tlp.topMargin = Math.round(22 * density);
+        tlp.bottomMargin = 0;
+        buttons.setLayoutParams(tlp);
+    }
+
     /** The first top-bar button after Inputs that is shown, in bar order (top_bar_apps, the network pill, ...); Settings is always there. */
     private View firstTopButton() {
         ViewGroup bar = findViewById(R.id.topButtons);
@@ -2323,6 +2390,34 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     /** top_bar_apps buttons, in bar order. */
     private final List<View> topAppButtons = new ArrayList<>();
+
+    /** notifications_button: the bell pill, left of the network pill; null when off. */
+    private TextView btnBell;
+    /** This Home's hook in GuardRevival, so a newer Home's is not cleared when this one is destroyed. */
+    private final Runnable bellListener = this::updateBell;
+
+    /** notifications_button: the bell, built like a top_bar_apps pill; it opens NotificationsActivity. */
+    private void addBell() {
+        ViewGroup bar = findViewById(R.id.topButtons);
+        btnBell = (TextView) getLayoutInflater().inflate(R.layout.top_app_button, bar, false);
+        btnBell.setId(View.generateViewId());   // pillKeys tells the bar's ends apart by id
+        btnBell.setContentDescription(getString(R.string.notifications));
+        btnBell.setOnClickListener(v -> open(new Intent(this, QuickSettingsActivity.class)
+                .putExtra(QuickSettingsActivity.EXTRA_NOTIFICATIONS, true)));
+        bar.addView(btnBell, bar.indexOfChild(btnWifi));
+        GuardRevival.onChange = bellListener;
+        updateBell();
+    }
+
+    /** The bell with a dot while any notification is waiting. It keeps the pill's tint, so it inverts on focus like the others. */
+    private void updateBell() {
+        if (btnBell == null || isDestroyed()) return;
+        boolean waiting = !GuardRevival.active(this).isEmpty();
+        Drawable icon = getDrawable(waiting ? R.drawable.ic_bell_badge : R.drawable.ic_bell);
+        int size = Math.round(22 * density);
+        icon.setBounds(0, 0, size, size);
+        btnBell.setCompoundDrawablesRelative(icon, null, null, null);
+    }
 
     /**
      * Puts each top_bar_apps app in the top bar as a round pill with the app's own logo, left of the network pill.

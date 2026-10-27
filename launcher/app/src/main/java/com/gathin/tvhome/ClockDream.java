@@ -19,6 +19,8 @@ public class ClockDream extends DreamService {
         setContentView(R.layout.dream_clock);
         scene = new ClockScene(getWindow().getDecorView());
         scene.useHomeWallpaper(this);
+        // screensaver_home is Home itself without the tiles: the dimmed backlight would make it look like another screen.
+        if (scene.homeMode()) setScreenBright(true);
     }
 
     @Override

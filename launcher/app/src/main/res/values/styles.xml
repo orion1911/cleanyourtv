@@ -4,6 +4,10 @@
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:colorBackground">@android:color/black</item>
         <item name="android:windowAnimationStyle">@null</item>
+        <!-- Deeper than Material's 0.039 / 0.19, so tiles lifted by elevation (square_tiles) float clearly over a
+             bright wallpaper. Only views with elevation cast these. -->
+        <item name="android:ambientShadowAlpha">0.14</item>
+        <item name="android:spotShadowAlpha">0.45</item>
     </style>
 
     <!-- Frosted pill, tvOS style. -->

@@ -140,6 +140,7 @@ final class WallpaperPlayer {
     /** Drops the wallpaper texture when Home is hidden and Android asks the process to free memory. */
     void releaseForMemoryPressure() {
         if (current == null) return;
+        endFade();
         image.setImageDrawable(null);
         // The renderer may still have a queued frame that references this hardware bitmap. Drop our references and
         // let Android reclaim its native buffer after rendering releases it instead of recycling it mid-frame.
@@ -259,14 +260,52 @@ final class WallpaperPlayer {
         return key.toString();
     }
 
-    /** Puts a picture on screen and releases the previous one after a frame has drawn the new one. */
+    /** The incoming picture while a crossfade runs, drawn just above {@link #image}; null otherwise. */
+    private ImageView fading;
+    /** The picture that crossfade is replacing, released once it is no longer drawn. */
+    private Bitmap fadingFrom;
+
+    /** Puts a picture on screen with a crossfade and releases the previous one after the transition. */
     private void show(Bitmap bitmap) {
+        endFade();   // before current changes: a fade cut short settles on the picture it was bringing in
         Bitmap old = current;
         current = bitmap;
         // The wallpaper covers the whole root; avoid drawing the fallback colour under it.
         root.setBackground(null);
-        image.setImageBitmap(bitmap);
-        if (old != null && old != bitmap) image.postDelayed(old::recycle, 500);
+        if (old == null || old == bitmap || image.getParent() != root) {
+            image.setImageBitmap(bitmap);
+            return;
+        }
+        // Crossfade: the new picture goes directly above the current one (below the tiles and the clock) and
+        // fades in over it. Placed under it, as before, the opaque current picture hid the whole fade and the
+        // change still landed as a cut when the animation ended.
+        ImageView next = new ImageView(root.getContext());
+        next.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        next.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        next.setImageBitmap(bitmap);
+        next.setAlpha(0f);
+        root.addView(next, root.indexOfChild(image) + 1, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        fading = next;
+        fadingFrom = old;
+        // Cancelling (endFade) skips this end action, so only a fade that ran to the end gets here.
+        next.animate().alpha(1f).setDuration(FADE_MS).withLayer().withEndAction(this::endFade).start();
+    }
+
+    private static final long FADE_MS = 1500;
+
+    /** Settles a crossfade, finished or cut short: the incoming picture becomes the wallpaper and its overlay goes. */
+    private void endFade() {
+        ImageView next = fading;
+        if (next == null) return;
+        Bitmap from = fadingFrom;
+        fading = null;
+        fadingFrom = null;
+        next.animate().cancel();
+        if (current != null) image.setImageBitmap(current);
+        root.removeView(next);
+        // Recycled a little later: the renderer may still hold a frame that draws the old texture.
+        if (from != null && from != current) image.postDelayed(from::recycle, 500);
     }
 
     private Bitmap decode(File file) {

@@ -30,13 +30,16 @@ public class GlassView extends View {
     private boolean flat;
     private boolean halo;
 
+    /** The plain white rim: soft, so the focused tile is outlined rather than framed. */
+    private static final int WHITE_RIM = 0xA6FFFFFF;
+
     public GlassView(Context context, AttributeSet attrs) {
         super(context, attrs);
         density = getResources().getDisplayMetrics().density;
         radius = 20f * density;
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.5f * density);
-        rim.setColor(0xCCFFFFFF);
+        rim.setStrokeWidth(1f * density);
+        rim.setColor(WHITE_RIM);
         glow.setStyle(Paint.Style.STROKE);
         // Cache the slab as a texture. The spring only changes translation, so the GPU can
         // move it without replaying clipPath and the glow on every frame. That path is
@@ -49,7 +52,7 @@ public class GlassView extends View {
         if (argb == 0) {
             glowRgb = 0xFFFFFF;
             glowAlpha = 0x30;
-            rim.setColor(0xCCFFFFFF);
+            rim.setColor(WHITE_RIM);
         } else {
             glowRgb = argb & 0xFFFFFF;
             glowAlpha = 0x70;
@@ -65,7 +68,7 @@ public class GlassView extends View {
     void setStyle(String style) {
         flat = Config.GLASS_RIM.equals(style) || Config.GLASS_HALO.equals(style);
         halo = Config.GLASS_HALO.equals(style);
-        rim.setStrokeWidth((flat ? 2f : 1.5f) * density);
+        rim.setStrokeWidth(1f * density);
         invalidate();
     }
 

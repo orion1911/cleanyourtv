@@ -12,10 +12,17 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.graphics.ColorFilter;
 import android.graphics.PixelFormat;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
+import android.graphics.drawable.AdaptiveIconDrawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
@@ -78,6 +85,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int ambient;
         /** uniform_tiles card fill, top and bottom colour; null until sampled from the icon. */
         int[] backdrop;
+        /** uniform_tiles: the adaptive icon's foreground alone, drawn on the glass when the card took the icon's plate colour. */
+        Drawable mark;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
             this(APP, label, component, banner, icon, null, 0);
@@ -107,12 +116,27 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int design = Math.round(DESIGN_W_DP * density);
         if (innerWidthPx <= 0 || columns <= 0) return design;
         int cell = innerWidthPx / columns;
+        // square_tiles: an ambient home row's proportions, each tile about four fifths of its slot, so the gaps stay
+        // even at any column count (the 80dp floor below would close them up at 9 or 10 columns).
+        if (squareTiles) return Math.round(cell * SQUARE_SHARE);
         int fit = (int) ((cell - 12 * density) / FOCUS_SCALE);
         return Math.max(Math.round(80 * density), Math.min(design, fit));
     }
 
+    /**
+     * square_tiles: near-square tiles with rounder corners, set from the config before any tile is measured
+     * (MainActivity and the constructor). A static, like the sizes here, so every static helper agrees on the shape.
+     */
+    static boolean squareTiles;
+    /** square_tiles: height over width, and the corner radius as a share of the width. */
+    static final float SQUARE_RATIO = 0.94f, SQUARE_CORNER = 0.22f;
+    /** square_tiles: the tile's share of its column. */
+    static final float SQUARE_SHARE = 0.81f;
+    /** square_tiles: the logo on a tile that is not focused, a little dimmer, so the focused one stands out. */
+    static final ColorFilter RESTING_LOGO = new PorterDuffColorFilter(0xFFBFBFBF, PorterDuff.Mode.MULTIPLY);
+
     static int tileHeightPx(int tileWidthPx) {
-        return Math.round(tileWidthPx * DESIGN_H_DP / DESIGN_W_DP);
+        return Math.round(tileWidthPx * (squareTiles ? SQUARE_RATIO : DESIGN_H_DP / DESIGN_W_DP));
     }
 
     /** Height of one grid item: the tile, the name label under it and the item's own padding. */
@@ -159,7 +183,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 : TOP_ROOM_DP + COMPACT_BOTTOM_ROOM_DP) * density;
         float perItem = (gridHeightPx - reserved) / (rowsBelowDock + 1);
         float tileH = perItem - (dockRow ? ITEM_EXTRA_DP : COMPACT_ITEM_EXTRA_DP) * density;
-        int byHeight = Math.round(tileH * DESIGN_W_DP / DESIGN_H_DP);
+        int byHeight = Math.round(tileH / (squareTiles ? SQUARE_RATIO : DESIGN_H_DP / DESIGN_W_DP));
         // Shrink at most to MIN_HEIGHT_FIT of the width-only size. Below that the tiles look lost in their wide
         // columns (2 rows under a titled dock came out at 80dp); the rows that still don't fit run off the bottom
         // and scroll, and MainActivity keeps the title's room above the dock.
@@ -208,6 +232,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean reducedMotion;
     /** The focus zoom may overshoot (config.xml, focus_overshoot). */
     private final boolean focusOvershoot;
+    /** focus_zoom in percent; 0 keeps the built-in zoom. */
+    private final int focusZoom;
+    /** white_marks: white logos on brand-coloured glass (whiteMark, brandGlass). */
+    private final boolean whiteMarks;
+    /** clear_glass: untinted frosted glass with each logo in its own colours (whiteMark with keepColour). */
+    private final boolean clearGlass;
     /** Package to the action its tile sends instead of the start screen (config.xml, launch_actions). */
     private final Map<String, String> launchActions;
     /** Hold OK opens the activity's tile menu (config.xml, tile_menu); false opens App info, as before. */
@@ -243,6 +273,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.appLabels = cfg.appLabels;
         this.appBanners = cfg.appBanners;
         this.uniformTiles = cfg.uniformTiles;
+        squareTiles = cfg.squareTiles;
+        this.focusZoom = cfg.focusZoom;
+        this.whiteMarks = cfg.whiteMarks;
+        this.clearGlass = cfg.clearGlass;
         // Tiles keep their identity across reload(), so a focused tile stays on its app instead of
         // its view being rebound to whatever app now sits in that slot.
         setHasStableIds(true);
@@ -422,7 +456,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             // tvOS-style tile: a large centred mark, no caption inside the card.
             View icon = v.findViewById(R.id.icon);
             FrameLayout.LayoutParams iconLp = (FrameLayout.LayoutParams) icon.getLayoutParams();
-            iconLp.width = iconLp.height = Math.round(h * ICON_SHARE);
+            // square_tiles: a larger logo; their marks carry no plate, so they need the room to read at a distance.
+            iconLp.width = iconLp.height = Math.round(h * (squareTiles ? 0.78f : ICON_SHARE));
             iconLp.bottomMargin = 0;
             icon.setLayoutParams(iconLp);
         } else if (h < Math.round(DESIGN_H_DP * density)) {
@@ -436,7 +471,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             View label = v.findViewById(R.id.label);
             label.setPadding(label.getPaddingLeft(), label.getPaddingTop(), label.getPaddingRight(), Math.round(4f * density));
         }
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot);
+        if (squareTiles) v.setBackground(new TileShadow(v.findViewById(R.id.card), density, focusScale()));
+        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot, focusScale());
     }
 
     @Override
@@ -457,11 +493,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         h.card.setVisibility(View.VISIBLE);
         h.card.setFocusable(true);
+        // square_tiles: the soft shadow under each tile (TileShadow) follows the tile's zoom; redraw it for this state.
+        if (h.itemView.getBackground() instanceof TileShadow) h.itemView.invalidate();
         h.name.setText(e.name);
         // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
         // In a single row every tile is the dock's kind: the big title above names it.
         boolean dockKind = dockRow && (singleRow || position < dockSize);
-        h.name.setVisibility(dockKind && restNameAlpha == 0f ? View.INVISIBLE : View.VISIBLE);
+        // With dock_title off nothing else names the focused app, so its own name fades in under it.
+        h.name.setVisibility(dockKind && restNameAlpha == 0f && dockTitle ? View.INVISIBLE : View.VISIBLE);
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
         h.name.setAlpha(focused ? 1f : restNameAlpha);
         h.card.setScaleX(focused && animations ? focusScale() : 1f);
@@ -474,8 +513,23 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
         h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
         if (uniformTiles && e.banner == null) {
-            if (e.backdrop == null) e.backdrop = backdrop(e.icon, ambientColorAt(position));
-            h.card.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, e.backdrop));
+            if (e.backdrop == null) {
+                int[] plate = iconPlate(e.icon);
+                if (clearGlass) {
+                    e.mark = whiteMark(e.icon, h.card.getResources(), true);
+                    e.backdrop = smokyGlass(plate, e.icon);
+                } else if (whiteMarks) {
+                    e.mark = whiteMark(e.icon, h.card.getResources(), false);
+                    e.backdrop = brandGlass(plate, e.icon);
+                } else {
+                    // The card takes the icon's plate colour, so drawing only the mark lets the glass show around it
+                    // instead of an opaque square of the same colour in the middle of a see-through tile.
+                    e.mark = plate != null ? markOf(e.icon) : null;
+                    e.backdrop = plate != null ? glassTint(plate) : backdrop(e.icon, ambientColorAt(position));
+                }
+            }
+            h.card.setBackground(glassTile(e.backdrop, h.card.getLayoutParams().width, h.card.getResources(),
+                    whiteMarks ? GradientDrawable.Orientation.TL_BR : GradientDrawable.Orientation.TOP_BOTTOM));
         }
         if (e.banner != null) {
             h.banner.setImageDrawable(e.banner);
@@ -485,7 +539,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         } else {
             h.banner.setImageDrawable(null);
             h.banner.setVisibility(View.GONE);
-            h.icon.setImageDrawable(e.icon);
+            h.icon.setImageDrawable(uniformTiles && e.mark != null ? e.mark : e.icon);
+            if (squareTiles) h.icon.setColorFilter(h.card.isFocused() ? null : RESTING_LOGO);
             h.icon.setVisibility(View.VISIBLE);
             h.label.setText(e.label);
             h.label.setVisibility(uniformTiles ? View.GONE : View.VISIBLE);
@@ -652,7 +707,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     float focusScale() {
-        return !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+        if (!animations) return 1f;
+        if (focusZoom > 0) return focusZoom / 100f;
+        return advancedEffects ? 1.12f : 1.10f;
     }
 
     /** A vivid colour sampled from the app's banner (or icon), cached per entry; a card's accent when it set one. */
@@ -707,13 +764,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     /**
-     * The uniform tile's fill. Where the icon sits on a flat colour of its own (a white or coloured rounded
-     * square), the card takes that colour, so the mark reads as filling the tile as on tvOS. Otherwise a
-     * gradient of the icon's main colour, deepened so the mark stands out. The card clips the corners.
+     * The uniform tile's fill for an icon with no plate of its own (onBindViewHolder takes the plate's colour when
+     * it has one): a gradient of the icon's main colour, deepened so the mark stands out, at glass strength.
      */
     private static int[] backdrop(Drawable live, int fallback) {
-        int[] plate = iconPlate(live);
-        if (plate != null) return plate;
         float[] hsv = new float[3];
         Color.colorToHSV(fallback, hsv);
         // Yellow darkened turns olive: lean it to amber instead.
@@ -721,7 +775,166 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         hsv[2] = Math.min(hsv[2], 0.62f);
         int top = Color.HSVToColor(hsv);
         hsv[2] *= 0.6f;
-        return new int[]{top, Color.HSVToColor(hsv)};
+        return glassTint(new int[]{top, Color.HSVToColor(hsv)});
+    }
+
+    /** How much of the tint a glass tile keeps: the wallpaper shows through the rest (0x99 = 60 %). */
+    private static final int GLASS_TINT_ALPHA = 0x99;
+
+    /** The colours at glass strength: a lighter top, a slightly clearer bottom, so the tile reads as lit from above. */
+    private static int[] glassTint(int[] colours) {
+        int[] out = new int[colours.length];
+        for (int i = 0; i < colours.length; i++) {
+            int alpha = i == 0 ? GLASS_TINT_ALPHA : GLASS_TINT_ALPHA - 0x14;
+            out[i] = (colours[i] & 0x00FFFFFF) | (alpha << 24);
+        }
+        return out;
+    }
+
+    /**
+     * A uniform tile's glass: the tint, a sheen where light catches the top, and a faint hairline round the edge
+     * (far fainter than the focus rim). No blur: three flat gradients, cheap on a 1 GB TV.
+     */
+    private static Drawable glassTile(int[] tint, int widthPx, Resources res, GradientDrawable.Orientation direction) {
+        float density = res.getDisplayMetrics().density;
+        GradientDrawable body = new GradientDrawable(direction, tint);
+        GradientDrawable sheen = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x33FFFFFF, 0x12FFFFFF, 0x00FFFFFF, 0x00FFFFFF});
+        GradientDrawable edge = new GradientDrawable();
+        edge.setColor(0);
+        edge.setCornerRadius(widthPx > 0 ? cornerRadius(widthPx, density) : 16f * density);
+        edge.setStroke(Math.max(1, Math.round(0.75f * density)), 0x47FFFFFF);
+        return new LayerDrawable(new Drawable[]{body, sheen, edge});
+    }
+
+    /**
+     * An adaptive icon's foreground alone, at the size it has inside the whole icon, or null for any other icon.
+     * Drawn on a copy, so the icon itself (sampled for colours elsewhere) keeps its own layer bounds.
+     */
+    private static Drawable markOf(Drawable icon) {
+        if (!(icon instanceof AdaptiveIconDrawable)) return null;
+        Drawable copy = icon.getConstantState() != null ? icon.getConstantState().newDrawable().mutate() : icon;
+        if (!(copy instanceof AdaptiveIconDrawable)) return null;
+        Drawable foreground = ((AdaptiveIconDrawable) copy).getForeground();
+        if (foreground == null) return null;
+        // The whole icon draws each layer at 1.5 times its bounds, centred (108dp layers seen through 72dp).
+        return new InsetDrawable(foreground, -AdaptiveIconDrawable.getExtraInsetFraction());
+    }
+
+    /** Size a white mark is rendered at, in px: sharper than the icon view at 1080p, and quick to make for every app. */
+    private static final int MARK_PX = 192;
+
+    /**
+     * white_marks: the app's logo in white. An adaptive icon's foreground (its own background left out), or any other
+     * icon whole with its plate keyed out by colour. Light parts stay fully white and darker ones a little clearer,
+     * so detail such as a play triangle on a logo still reads. Null keeps the icon as it is: a picture-like icon with
+     * no plate to key out would only turn into a white blob. Rendered once per app.
+     */
+    private static Drawable whiteMark(Drawable icon, Resources res, boolean keepColour) {
+        if (icon == null) return null;
+        Drawable foreground = markOf(icon);
+        Drawable source = foreground != null ? foreground
+                : icon.getConstantState() != null ? icon.getConstantState().newDrawable().mutate() : icon;
+        int n = MARK_PX;
+        Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+        Rect saved = new Rect(source.getBounds());
+        source.setBounds(0, 0, n, n);
+        source.draw(new Canvas(bmp));
+        source.setBounds(saved);
+        int[] px = new int[n * n];
+        bmp.getPixels(px, 0, n, 0, 0, n, n);
+        // A plate still in the picture (a whole icon, or a foreground drawn on a background of its own) goes by its
+        // colour, sampled as iconPlate does on two rows and graded between them.
+        int rowA = Math.round(n * 0.16f), rowB = n - 1 - rowA;
+        int plateA = plateColor(bmp, rowA, n), plateB = plateColor(bmp, rowB, n);
+        boolean keyed = plateA != 0 && plateB != 0;
+        if (!keyed && foreground == null) {
+            int opaque = 0;
+            for (int p : px) if (Color.alpha(p) > 200) opaque++;
+            if (opaque > px.length * 0.55f) {
+                bmp.recycle();
+                return null;
+            }
+        }
+        // A foreground layer is seen through the icon's rounded mask: anything it draws outside that (a long shadow,
+        // a square backdrop) would show as a square edge on the glass, so the same rounded square is cut here.
+        float half = n / 2f, corner = n * 0.3f, straight = half - corner;
+        for (int y = 0; y < n; y++) {
+            float t = Math.max(0f, Math.min(1f, (y - rowA) / (float) (rowB - rowA)));
+            int plate = keyed ? mix(plateA, plateB, t) : 0;
+            for (int x = 0; x < n; x++) {
+                int i = y * n + x, p = px[i], a = Color.alpha(p);
+                if (a == 0) continue;
+                if (foreground != null) {
+                    float dx = Math.max(0f, Math.abs(x + 0.5f - half) - straight);
+                    float dy = Math.max(0f, Math.abs(y + 0.5f - half) - straight);
+                    if (dx * dx + dy * dy > corner * corner) {
+                        px[i] = 0;
+                        continue;
+                    }
+                }
+                int r = Color.red(p), g = Color.green(p), b = Color.blue(p);
+                float keep = 1f;
+                if (keyed) {
+                    int d = Math.abs(r - Color.red(plate)) + Math.abs(g - Color.green(plate)) + Math.abs(b - Color.blue(plate));
+                    keep = Math.max(0f, Math.min(1f, (d - 56f) / 60f));   // soft edge, so the mark keeps its anti-aliasing
+                }
+                float lum = (0.299f * r + 0.587f * g + 0.114f * b) / 255f;
+                float alpha = a / 255f;
+                // Only the solid logo turns white. Faint pixels (a haze or backdrop behind the logo) and soft dark
+                // ones (its drop shadow) would otherwise turn into a pale square behind it.
+                float solid = Math.max(0f, Math.min(1f, (alpha - 0.4f) / 0.35f));
+                if (lum < 0.3f && alpha < 0.7f) solid = 0f;
+                px[i] = keepColour
+                        ? Math.round(255 * solid * keep) << 24 | (p & 0xFFFFFF)
+                        : Math.round(255 * solid * keep * (0.72f + 0.28f * lum)) << 24 | 0xFFFFFF;
+            }
+        }
+        bmp.setPixels(px, 0, n, 0, 0, n, n);
+        return new BitmapDrawable(res, bmp);
+    }
+
+    /** dominantColor's answer for an icon with no colour of its own, and the frosted grey such a tile gets instead. */
+    private static final int NO_COLOUR = 0xFF6E6E73, NEUTRAL_GLASS = 0xFF9EA4AE;   // a cool silver
+
+    /**
+     * white_marks: the tile's glass in the app's brand colour, lighter at the top left and deeper, turned a little
+     * round the colour wheel, at the bottom right. The plate's colour when it is a real colour; a white, grey or black
+     * plate, or none, gives the logo's own main colour, so a white mark never sits on white.
+     */
+    /**
+     * clear_glass: smoky glass, nearly opaque dark at the top and lighter towards the lower edge, as on an ambient
+     * home screen. Opaque enough that the logo reads over a bright wallpaper.
+     */
+    private static int[] smokyGlass(int[] plate, Drawable icon) {
+        // One cold glass for every tile, matching the theme's frosty blue-hour wallpapers: per-app brand colours
+        // turned red and pink logos' tiles warm, which clashed with them. Navy at the top to steel blue at the bottom.
+        return COLD_GLASS.clone();
+    }
+
+    /** clear_glass: smoky navy at the top, slate through the middle, a cold steel blue along the lower edge. */
+    private static final int[] COLD_GLASS = {0xDE0E1622, 0xD61C2A3E, 0xD1426080};
+
+    private static int[] brandGlass(int[] plate, Drawable icon) {
+        float[] hsv = new float[3];
+        int base = 0;
+        if (plate != null) {
+            int middle = mix(plate[0], plate[1], 0.5f);
+            Color.colorToHSV(middle, hsv);
+            if (hsv[1] >= 0.25f && hsv[2] >= 0.22f) base = middle;
+        }
+        if (base == 0) base = dominantColor(icon);
+        if (base == NO_COLOUR) base = NEUTRAL_GLASS;
+        Color.colorToHSV(base, hsv);
+        // Yellow deepened turns olive: lean it to amber instead.
+        if (hsv[0] > 42f && hsv[0] < 70f && hsv[1] > 0.3f) hsv[0] = 36f;
+        float h = hsv[0], s = hsv[1], v = hsv[2];
+        // A hint of the colour on clear glass, not a coloured slab: half the saturation, and see-through enough that
+        // the wallpaper still reads behind every tile.
+        int light = Color.HSVToColor(0x80, new float[]{h, s * 0.5f, Math.min(0.78f, Math.max(0.45f, v * 0.95f + 0.1f))});
+        int deep = Color.HSVToColor(0x8C, new float[]{(h + 12f) % 360f, Math.min(1f, s * 0.62f),
+                Math.max(0.16f, Math.min(0.46f, v * 0.58f))});
+        return new int[]{light, deep};
     }
 
     /**
@@ -856,6 +1069,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     /** Corner radius for a tile of this width: 16dp at the design width, proportionally less when smaller. */
     static float cornerRadius(int tileWidthPx, float density) {
+        if (squareTiles) return tileWidthPx * SQUARE_CORNER;
         return 16f * density * Math.min(1f, tileWidthPx / (DESIGN_W_DP * density));
     }
 
@@ -875,7 +1089,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final boolean overshoot;
 
         Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha, boolean overshoot) {
+               boolean reducedMotion, float restNameAlpha, boolean overshoot, float focusScale) {
             super(v);
             card = v.findViewById(R.id.card);
             cardBackground = card.getBackground();
@@ -895,9 +1109,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 public void getOutline(View view, Outline outline) {
                     // 16dp at the design width, scaled down with the tile so small tiles keep the same shape.
                     outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), cornerRadius(view.getWidth(), density));
+                    // square_tiles: the outline only clips the corners. Its elevation shadow would show through the
+                    // glass as a dark square; TileShadow draws one outside the tile instead.
+                    if (squareTiles) outline.setAlpha(0f);
                 }
             });
             card.setClipToOutline(true);
+            // square_tiles: TileShadow follows the zoom, so redraw the item's background on each frame of it.
+            if (squareTiles) card.animate().setUpdateListener(a -> itemView.invalidate());
 
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
@@ -908,10 +1127,11 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             });
 
             card.setOnFocusChangeListener((view, focused) -> {
+                if (squareTiles) icon.setColorFilter(focused ? null : RESTING_LOGO);
                 view.animate().cancel();
                 banner.animate().cancel();
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+                float scale = focusScale;   // the adapter's focusScale(): the glass is fitted to the same zoom
                 float s = focused ? scale : 1f;
                 if (!animations) {
                     view.setScaleX(1f);

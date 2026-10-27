@@ -13,6 +13,15 @@
         android:scaleType="centerCrop"
         android:importantForAccessibility="no" />
 
+    <!-- screensaver_home: the next picture fades in here over the current one, then takes its place. -->
+    <ImageView
+        android:id="@+id/dreamAmbientNext"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:alpha="0"
+        android:importantForAccessibility="no" />
+
     <LinearLayout
         android:id="@+id/dreamContent"
         android:layout_width="wrap_content"
@@ -26,6 +35,7 @@
             android:baselineAligned="true">
 
             <TextClock
+                android:id="@+id/dreamClock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:format12Hour="h:mm"
@@ -37,6 +47,7 @@
                 android:includeFontPadding="false" />
 
             <TextClock
+                android:id="@+id/dreamAmpm"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
@@ -50,6 +61,7 @@
         </LinearLayout>
 
         <TextClock
+            android:id="@+id/dreamDate"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="6dp"

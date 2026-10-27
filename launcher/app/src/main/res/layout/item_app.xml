@@ -62,7 +62,7 @@
         android:alpha="0"
         android:translationY="-6dp"
         android:textColor="#F2FFFFFF"
-        android:textSize="14sp"
-        android:fontFamily="@string/font_medium"
+        android:textSize="13sp"
+        android:fontFamily="@string/font_light"
         android:letterSpacing="0.02" />
 </FrameLayout>

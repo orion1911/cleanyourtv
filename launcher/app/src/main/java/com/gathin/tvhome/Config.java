@@ -252,6 +252,21 @@ final class Config {
     final int clockWallpaperDim;
     /** The clock screensaver's coloured glow; false leaves the clock on plain black, e.g. for an OLED (config.xml, clock_glow). */
     final boolean clockGlow;
+    /** Theme-only switches, all off by default; set by load() after the constructor. */
+    /** clock_large: a large thin clock with the date under it in sentence case (HomeClockStyle). */
+    boolean clockLarge;
+    /** square_tiles: uniform tiles as near-squares instead of 16:9. */
+    boolean squareTiles;
+    /** focus_zoom: the focused tile's zoom in percent, 105 to 130; 0 keeps the built-in 110/112. */
+    int focusZoom;
+    /** screensaver_home: the clock screensaver is Home without its tiles and buttons: same clock, same place, the wallpaper undimmed. */
+    boolean screensaverHome;
+    /** white_marks (uniform_tiles): each app's logo in white on glass of its brand colour, as on an ambient home screen. */
+    boolean whiteMarks;
+    /** clear_glass (uniform_tiles): untinted frosted glass, each logo in its own colours without its plate. */
+    boolean clearGlass;
+    /** notifications_button: a bell in the top bar and a row in the Settings button's panel (NotificationsActivity). */
+    boolean notificationsButton;
     /** Every app in the dock's row, which scrolls sideways, and no grid below it (config.xml, single_row); needs dock_row. */
     final boolean singleRow;
     /** With single_row, the band runs behind every app in the row, not only the dock apps (config.xml, dock_band_all). */
@@ -520,7 +535,7 @@ final class Config {
             inputAction = string(json, "input_action", inputAction);
             inputSources = stringList(json, "input_sources", inputSources);
             inputUriScheme = string(json, "input_uri_scheme", inputUriScheme).trim();
-            columns = integer(json, "columns", columns, 1, 8);
+            columns = integer(json, "columns", columns, 1, 10);   // 9 and 10 for small square tiles (square_tiles)
             rowsBelow = integer(json, "rows_below_dock", rowsBelow, 0, 3);
             animations = bool(json, "animations", animations);
             advancedEffects = bool(json, "advanced_effects", advancedEffects);
@@ -647,7 +662,7 @@ final class Config {
         Festival festival = json == null ? Festival.NONE : Festival.parse(string(json, "festival", ""),
                 string(json, "festival_until", ""), string(json, "greeting", ""), string(json, "accent_color", ""));
 
-        return new Config(dock, fillDock, hidden, libraryApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
+        Config cfg = new Config(dock, fillDock, hidden, libraryApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
                 packageMap(appBanners), panelService, panelAction, panelExtra, coocaaSources, inputAction, inputSources, inputUriScheme, Math.max(1, columns),
                 Math.max(0, rowsBelow), animations, advancedEffects, shamsi, greetingName, moduleCards, reducedMotion, bootToLiveTv,
                 openOnStartChoice, dockTitle, dockRow, topMenu, launcherSettingsButton, reorderButton, showNetworkPill, showInputsPill,
@@ -661,6 +676,17 @@ final class Config {
                 consumeVolumeKeys, powerOnHome, homeLongPressHome, wifiStatusWarnings, topBarApps, showGreeting, headerWhite, clockWallpaper,
                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
                 dateBelowClock, vpnPill, locale, powerOnHomeAlways);
+        if (json != null) {
+            cfg.clockLarge = bool(json, "clock_large", false);
+            cfg.squareTiles = bool(json, "square_tiles", false) && uniformTiles;
+            int zoom = integer(json, "focus_zoom", 0, 105, 130);
+            cfg.focusZoom = zoom;
+            cfg.screensaverHome = bool(json, "screensaver_home", false);
+            cfg.whiteMarks = bool(json, "white_marks", false) && uniformTiles;
+            cfg.clearGlass = bool(json, "clear_glass", false) && uniformTiles;
+            cfg.notificationsButton = bool(json, "notifications_button", false);
+        }
+        return cfg;
     }
 
     /**

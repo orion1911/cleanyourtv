@@ -173,3 +173,80 @@ Never do these in a PR:
 Questions go to [GitHub Discussions](https://github.com/Gathin23/cleanyourtv/discussions); bugs, TV lists and
 ideas that need a launcher change or a new dependency go to an issue first, with the templates in
 `.github/ISSUE_TEMPLATE/`.
+
+## Handover: this checkout's TV (Sony BRAVIA BF1), local customisations
+
+Local work for one person's TV, not upstream material: the launcher changes below are a heavy restyle with some
+changed defaults, which the rules above route to a fork (`SHOWCASE.md`), so do not open a PR from this tree as is.
+The new look is switched on by the `aerial-glass` theme only; every new key is off by default.
+
+### The TV
+
+- Sony BRAVIA BF1, Google TV 12 (SDK 31), firmware `STT2.230811.001`. 4K panel, UI at 1920x1080, density 2.0.
+- Address and restore commands: `backup/RESTORE.md` (gitignored). Home is `com.gathin.tvhome`; the stock
+  `launcherx`, `setupwraith` and `dreamx` (Google's ambient screensaver) are disabled.
+- Settings changed by hand: `secure screensaver_components` and `screensaver_default_component` =
+  `com.gathin.tvhome/.ClockDream`. With `dreamx` disabled, the old value made the screensaver fail to bind and the TV
+  dropped to standby after 10 minutes. `global stay_on_while_plugged_in` set back to `0` (a "Stay awake" switched on
+  later stops any screensaver). `screen_off_timeout` is 10 minutes.
+- Netflix (`com.netflix.ninja`) is hidden on Home but enabled. Once opened (from TV Settings), its own sign-in flow
+  kept bringing it to the front; it was force-stopped. Disabling it was offered; the person has not answered.
+
+### How to work on it (Windows, PowerShell 5.1)
+
+- `tools\tv.py`: `$env:TV_HOST='<tv ip>'`, run with `tools\venv\Scripts\python.exe -W ignore`. PowerShell 5.1 drops
+  inner quotes from native arguments, so commands with quotes or pipes go through `--batch` from a file:
+  `cmd /c "tools\venv\Scripts\python.exe -W ignore tools\tv.py --batch < work\q.txt"`.
+- Build and install: `launcher\gradlew.bat --stop`, then `launcher\build-and-install.ps1 -TvHost <tv ip>` (about
+  90 s; Home already belongs to the launcher, nothing gets disabled). Without the `--stop` a leftover daemon can lock
+  `minifyReleaseWithR8\classes.dex` and the build fails in seconds. Run long jobs in the background: the shell
+  connector used here stalls under Gradle load.
+- Theme: `tools\theme.ps1 -TvHost <tv ip> themes\aerial-glass` (about 2 minutes, re-uploads every wallpaper). Its
+  exit code 1 comes from Python warnings on stderr; success is the line "applied". Code-only changes need no push.
+- Checking: `tools\tv.py --screenshot shots\N.png`; `uiautomator dump` for exact bounds of tiles, names and the
+  clock; `work\ascii.ps1` (coarse ASCII preview) and `work\tiles.ps1` (per-tile colours) measure screenshots. The
+  person reviews with phone photos next to the samples; that is the real visual check.
+- Screensaver without waiting: `am start -n com.android.systemui/.Somnambulator`, then
+  `dumpsys dreams | grep mCurrentDreamName`; wake with `input keyevent KEYCODE_WAKEUP`.
+
+### The design and where it lives
+
+Target: the photos in `inspiration/`; `WhatsApp Image 2026-10-26 at 14.46.00.jpeg` (snowy peaks, 11:05) is the core
+look. The table is the state the person last approved.
+
+| Theme key (aerial-glass) | Code | What it does |
+|---|---|---|
+| `clock_large`, `show_greeting: false` | `HomeClockStyle` (new), `MainActivity.applyLargeClock` | Outfit ExtraLight 126sp squeezed to 0.75 width (reads tall), the date under it in the locale's order and sentence case, no text shadows (their blur was clipped into a visible box), top buttons level with the clock's top |
+| `screensaver_home` | `ClockScene`, `ClockDream`, `dream_clock.xml` | The screensaver is Home without tiles and buttons: same clock in the same place, the picture Home is showing (Home's dim and colour depth), full brightness, crossfaded rotation written back to Home's rotation state |
+| `square_tiles`, `columns: 10`, `focus_zoom: 120` | `AppAdapter` (sizes, 22% corners, tile = 81% of its slot), `MainActivity` (row placement) | Near-square tiles; the row sits low (tiles end near 89% of the height) and starts under the clock. At most 10 show and the rest scroll in from the right (grid clip bounds); fewer than 10 are centred (an offset decoration). `Config` accepts up to 10 columns |
+| `clear_glass` | `AppAdapter.smokyGlass`, `glassTile`, `whiteMark(keepColour)` | One cold glass for every tile (`COLD_GLASS`: navy top to steel blue bottom, about 85% opaque) to match the wallpapers; per-app colours were dropped at the person's request (red and pink tiles). Logos in their own colours with plate, haze and drop shadow removed (adaptive foreground masked to the icon's rounded square), 78% of the tile height, unfocused ones 25% dimmer (`RESTING_LOGO`) |
+| `white_marks` (off) | `AppAdapter.whiteMark`, `brandGlass` | Earlier variant, white logos on brand-coloured glass; kept, unused |
+| `glass_style: rim` | `GlassView` | Focus: a crisp white rim, 1dp at about 65% white, no halo |
+| `always_show_names: false` | `AppAdapter`, `item_app.xml` | Only the focused tile shows its name, under it: Outfit Light 13sp, no shadow. With `dock_title` off the focused name now shows in a single row (it used to stay hidden) |
+| (square tiles) | `TileShadow` (new) | A soft shadow drawn only outside each tile. Android's elevation shadow showed through the glass as a dark square, so the tiles' outline alpha is 0 (it still clips the corners) |
+| `wallpapers/` | `themes/aerial-glass/wallpapers`, `CREDITS.md` | 12 cold blue-hour landscapes from Wikimedia Commons (CC licences, credited), cropped to 1920x1080 and graded cooler and about 10% darker by `work\make_walls.ps1`, from candidates `work\fetch_walls.ps1` measured. Upscaled sources need `TileFlipXY` in the scaler, or their edges come out black (looked like bars). The previous Unsplash set is in `work\old-wallpapers` |
+
+| `notifications_button` | `GuardRevival` (now also lists, cancels and clears notifications), `MainActivity.addBell`, `ic_bell*.xml` | A bell left of Wi-Fi, with a dot while anything waits; it keeps the pill tint so it inverts on focus. It opens the panel below on its notifications. Google TV's own panel belonged to the disabled `launcherx`. Needs `cmd notification allow_listener com.gathin.tvhome/com.gathin.tvhome.GuardRevival` (granted; Android 12 records it in `dumpsys notification`, not `enabled_notification_listeners`) |
+| `settings_key_panel` | `QuickSettingsActivity` (rewritten), `activity_panel.xml`, `panel_drawer.xml`, `HomeKeyService` | The remote's gear (`KEYCODE_SETTINGS`, otherwise routed to a MediaTek agent that opened launcherx's panel) opens a drawer shaped like Google TV's: date and time with a TV-settings gear, tiles (Screensaver, Wi-Fi, Bluetooth, Picture, System update, Launcher), notification cards that turn light on focus, Clear all. Installed with `-HomeKeyService -RestoreKeyServices`; re-pass both on every install. Only a real press proves the gear (injected keys bypass the helper) |
+
+Tile shadow (`TileShadow`): light at rest, it follows the zoom and lift and deepens to its focused strength; the
+Holder invalidates the item on each animation frame. Unfocused logos are 25% dimmer.
+
+### To do next (checkpoint 2026-10-27, 01:24)
+
+1. **Bluetooth tile shows "feature not available".** `Settings.ACTION_BLUETOOTH_SETTINGS` does not resolve on this
+   Sony. Find what Google TV's settings use for Bluetooth / "Remotes & accessories" (`cmd package query-activities`
+   on `com.android.tv.settings`, e.g. an accessories activity) and open that from the tile instead.
+2. **Weather widget beside the clock, as in the core sample** (current temperature with an icon, place, condition,
+   high/low, and the small advice pill), with the clock made a little smaller to make room. The launcher has no
+   `INTERNET` permission by design, so weather needs either an add-on module card app (`addons/`, its own network
+   permission) or a fork-level permission change: decide with the person first.
+3. Confirm with the person that the gear button opens the new drawer (real press) and that the last build installed
+   (it finished while the connector was down).
+4. Netflix: disable or leave as it is (asked, not answered).
+
+Also changed: `WallpaperPlayer`'s crossfade (the incoming picture was added behind the opaque current one, so no fade
+showed and the change landed as a cut); `styles.xml` raises the app's shadow alphas (the tiles no longer use them,
+other elevated views do); `config.xml` has `advanced_effects` on (first session). Ideas not yet asked for: a soft
+shade behind the clock digits on very light skies; three thin line-art logos (Media Player, Timers & Clock, one
+more) read fainter than the rest.
