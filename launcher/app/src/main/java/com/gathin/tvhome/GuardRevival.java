@@ -126,6 +126,9 @@ public class GuardRevival extends NotificationListenerService {
             if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
             if ((n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) continue;
             if (Notification.CATEGORY_SERVICE.equals(n.category)) continue;
+            // Android's own standing notices ("Serial console enabled", debugging on): nothing to open or clear, and
+            // shown they would keep the bell's dot on for good.
+            if ("android".equals(sbn.getPackageName()) && !sbn.isClearable()) continue;
             CharSequence title = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE);
             if (title == null || title.toString().trim().isEmpty()) continue;
             shown.add(sbn);

@@ -507,6 +507,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         greetingName = cfg.greetingName;
         if (cfg.dateBelowClock || cfg.clockLarge) moveDateBelowClock();
         if (cfg.clockLarge) applyLargeClock();
+        if (cfg.clockLarge && cfg.weatherWidget) addWeather();
         if (shamsi) {
             shamsiDate.setVisibility(View.VISIBLE);
             TextView date = findViewById(R.id.date);
@@ -986,6 +987,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         updateBell();   // notifications_button: anything read or dismissed while away
+        if (weather != null) weather.start();
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
             recreate();
@@ -1197,6 +1199,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        if (weather != null) weather.stop();
         root.removeCallbacks(showIdleClock);
         endReorder();   // Home or another app while reordering keeps the order so far
         wallpaperPlayer.stop();
@@ -2358,6 +2361,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         clockColumn.addView(column, clockColumn.indexOfChild(clockRow) + 1, lp);
     }
 
+    /** weather_widget: the weather under the date (WeatherWidget); null when off. Runs only while Home is in front. */
+    private WeatherWidget weather;
+
+    private void addWeather() {
+        View column = (View) findViewById(R.id.date).getParent();
+        LinearLayout clockColumn = (LinearLayout) column.getParent();
+        weather = new WeatherWidget(this);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = Math.round(14 * density);
+        clockColumn.addView(weather.view(), clockColumn.indexOfChild(column) + 1, lp);
+    }
+
     /**
      * clock_large: the header as on an ambient home screen (HomeClockStyle, shared with the screensaver), the date
      * tucked under the digits, and the top buttons level with the top of the clock instead of its bottom line.
@@ -2412,7 +2428,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** The bell with a dot while any notification is waiting. It keeps the pill's tint, so it inverts on focus like the others. */
     private void updateBell() {
         if (btnBell == null || isDestroyed()) return;
-        boolean waiting = !GuardRevival.active(this).isEmpty();
+        // The dot is for something to read and clear: a standing notice an app keeps up does not light it.
+        boolean waiting = false;
+        for (android.service.notification.StatusBarNotification sbn : GuardRevival.active(this)) {
+            if (sbn.isClearable()) {
+                waiting = true;
+                break;
+            }
+        }
         Drawable icon = getDrawable(waiting ? R.drawable.ic_bell_badge : R.drawable.ic_bell);
         int size = Math.round(22 * density);
         icon.setBounds(0, 0, size, size);
@@ -3406,7 +3429,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         });
         // Some firmware has no App info page at all; a row that only toasts "can't open" helps nobody.
         Intent info = SystemSettings.appInfo(this, pkg);
-        if (info != null) addSettingsMenuRow(rows, popup, R.string.library_app_info, () -> open(info));
+        // square_tiles (this Sony): TV Settings' Apps section instead of the app's own page, which this firmware draws
+        // as a bare, see-through split screen that looked broken. The page stays the fallback.
+        if (AppAdapter.squareTiles && info != null) {
+            Intent apps = new Intent(android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS);
+            if (getPackageManager().resolveActivity(apps, 0) != null) info = apps;
+        }
+        Intent target = info;
+        if (target != null) addSettingsMenuRow(rows, popup, R.string.library_app_info, () -> open(target));
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         popup.setWidth(Math.max((int) (200 * density), panel.getMeasuredWidth()));
         // Dock tiles sit near the bottom of the screen: open the menu above the tile when it would not fit below.

@@ -267,6 +267,8 @@ final class Config {
     boolean clearGlass;
     /** notifications_button: a bell in the top bar and a row in the Settings button's panel (NotificationsActivity). */
     boolean notificationsButton;
+    /** weather_widget (with clock_large): the weather under the clock, from the Weather add-on (WeatherWidget). */
+    boolean weatherWidget;
     /** Every app in the dock's row, which scrolls sideways, and no grid below it (config.xml, single_row); needs dock_row. */
     final boolean singleRow;
     /** With single_row, the band runs behind every app in the row, not only the dock apps (config.xml, dock_band_all). */
@@ -685,6 +687,7 @@ final class Config {
             cfg.whiteMarks = bool(json, "white_marks", false) && uniformTiles;
             cfg.clearGlass = bool(json, "clear_glass", false) && uniformTiles;
             cfg.notificationsButton = bool(json, "notifications_button", false);
+            cfg.weatherWidget = bool(json, "weather_widget", false);
         }
         return cfg;
     }

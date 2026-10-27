@@ -53,5 +53,6 @@
   "focus_zoom": 120,
   "screensaver_home": true,
   "notifications_button": true,
-  "settings_key_panel": true
+  "settings_key_panel": true,
+  "weather_widget": true
 }

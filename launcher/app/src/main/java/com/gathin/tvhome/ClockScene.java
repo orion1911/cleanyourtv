@@ -123,6 +123,7 @@ final class ClockScene {
             // Decoded right here, as Home's first picture is: fading in over Home with a black frame and the picture
             // popping in later would look like the TV switching off.
             if (wallpaperFile != null && !wallpaperShown) showWallpaperNow();
+            if (weather != null) weather.start();
             return;
         }
         content.setAlpha(0f);
@@ -139,6 +140,7 @@ final class ClockScene {
         handler.removeCallbacksAndMessages(null);   // the tick and any glow steps still queued
         content.animate().cancel();
         ambientNext.animate().cancel();
+        if (weather != null) weather.stop();
         wallpaperGeneration++;   // a decode still running must not attach its picture to a stopped scene
     }
 
@@ -216,7 +218,18 @@ final class ClockScene {
         alp.setMarginStart(Math.round(6 * dp));
         ampm.setLayoutParams(alp);
         ambient.setBackground(new ColorDrawable(cfg.backgroundColor));
+        if (cfg.weatherWidget) {
+            // The same weather as Home's header, under the date, so nothing moves as the screensaver takes over.
+            weather = new WeatherWidget(ctx);
+            android.widget.LinearLayout.LayoutParams wlp = new android.widget.LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            wlp.topMargin = Math.round(14 * dp);
+            ((ViewGroup) content).addView(weather.view(), wlp);
+        }
     }
+
+    /** screensaver_home with weather_widget: Home's weather under the clock; null otherwise. */
+    private WeatherWidget weather;
 
     /** screensaver_home: the first picture, decoded on this thread so the screensaver's first frame has it. */
     private void showWallpaperNow() {

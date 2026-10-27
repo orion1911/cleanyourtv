@@ -48,4 +48,12 @@
     <string name="sky_showers">Showers</string>
     <string name="sky_snow_showers">Snow showers</string>
     <string name="sky_thunderstorm">Thunderstorm</string>
+    <!-- The launcher header's pill (NowProvider, Forecast.hint). English only for now. -->
+    <string name="hint_umbrella" translatable="false">Umbrella</string>
+    <string name="hint_warm_coat" translatable="false">Warm coat</string>
+    <string name="hint_jacket" translatable="false">Jacket</string>
+    <string name="hint_light_jacket" translatable="false">Light jacket</string>
+    <string name="hint_stay_cool" translatable="false">Stay cool</string>
+    <string name="hint_cools" translatable="false">cools to %1$d° by %2$s</string>
+    <string name="hint_warms" translatable="false">warms to %1$d° by %2$s</string>
 </resources>

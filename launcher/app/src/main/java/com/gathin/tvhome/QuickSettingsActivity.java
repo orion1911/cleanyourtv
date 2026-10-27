@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -31,7 +32,7 @@ import java.util.Locale;
 
 /**
  * The panel the remote's Settings button opens (settings_key_panel, HomeKeyService) and Home's bell opens
- * (notifications_button), shaped like Google TV's own, which left with its stock launcher: a tall drawer on the right
+ * (notifications_button), shaped like Google TV's own, which left with its stock launcher: a compact drawer at the top right
  * with the date and time, a grid of quick tiles, the notifications as cards and Clear all. Translucent and in a task
  * of its own, so the app behind keeps running and Back returns to it. Pressing Settings again closes it.
  */
@@ -40,10 +41,10 @@ public final class QuickSettingsActivity extends Activity {
     static final String EXTRA_NOTIFICATIONS = "com.gathin.tvhome.extra.NOTIFICATIONS";
     private static final int MAX_CARDS = 8;
 
-    private static final int CARD = 0xFF2E333D, CARD_FOCUSED = 0xFFE9EEF6;
-    private static final int TEXT = 0xFFFFFFFF, TEXT_FOCUSED = 0xFF141922;
-    private static final int SUB = 0xB3FFFFFF, SUB_FOCUSED = 0xFF4B525D;
-    private static final int BADGE = 0xFF3B414C, BADGE_FOCUSED = 0xFFD3DAE6;
+    static final int CARD = 0xFF2E333D, CARD_FOCUSED = 0xFFE9EEF6;
+    static final int TEXT = 0xFFFFFFFF, TEXT_FOCUSED = 0xFF141922;
+    static final int SUB = 0xB3FFFFFF, SUB_FOCUSED = 0xFF4B525D;
+    static final int BADGE = 0xFF3B414C, BADGE_FOCUSED = 0xFFD3DAE6;
 
     private float dp;
     private LinearLayout cards;
@@ -67,7 +68,7 @@ public final class QuickSettingsActivity extends Activity {
         date.setFormat12Hour(pattern);
         date.setFormat24Hour(pattern);
         ImageView gear = findViewById(R.id.panelGear);
-        gear.setBackground(states(0x00000000, CARD_FOCUSED, 20 * dp));
+        gear.setBackground(states(0x00000000, CARD_FOCUSED, 17 * dp));
         gear.setImageTintList(colors(TEXT, TEXT_FOCUSED));
         gear.setOnClickListener(v -> open(SystemSettings.intent(this, Settings.ACTION_SETTINGS)));
 
@@ -76,12 +77,19 @@ public final class QuickSettingsActivity extends Activity {
                 .setClassName("com.android.systemui", "com.android.systemui.Somnambulator"))));
         tiles.add(tile(R.drawable.ic_wifi, R.string.quick_network,
                 () -> open(SystemSettings.intent(this, Settings.ACTION_WIFI_SETTINGS))));
-        tiles.add(tile(R.drawable.ic_bluetooth, R.string.quick_bluetooth,
-                () -> open(SystemSettings.intent(this, Settings.ACTION_BLUETOOTH_SETTINGS))));
-        tiles.add(tile(R.drawable.ic_picture, R.string.quick_picture,
-                () -> open(SystemSettings.intent(this, Settings.ACTION_DISPLAY_SETTINGS))));
-        tiles.add(tile(R.drawable.ic_system_update, R.string.system_update,
-                () -> open(SystemSettings.intent(this, "android.settings.SYSTEM_UPDATE_SETTINGS"))));
+        // Google TV's settings have no screen for the standard Bluetooth action (it answered "not available"): the
+        // accessory pairing screen Android TV opens for CONNECT_INPUT is next, TV settings last.
+        // Both accessory screens need BLUETOOTH_CONNECT (Android 12): the manifest asks for it and it is granted
+        // over ADB; without it they refuse and the next one is tried. Sony's own screen first, then Android TV's.
+        // TV Settings' own "Remotes & Accessories" page is a slice its SliceActivity shows by address, the one its main
+        // menu uses (found in the Settings app; on this Sony MediaTek's provider of the same name only has /rs, RS-232).
+        // The screens after it are fallbacks.
+        tiles.add(tile(R.drawable.ic_bluetooth, R.string.quick_bluetooth, () -> openFirst(
+                accessories("content://com.android.tv.settings.accessories.sliceprovider/general"),
+                new Intent(Settings.ACTION_BLUETOOTH_SETTINGS),
+                new Intent("android.settings.SONYADDACCESSORYACTIVITY"),
+                new Intent("com.google.android.intent.action.CONNECT_INPUT"),
+                SystemSettings.intent(this, Settings.ACTION_SETTINGS))));
         // Through Home, so it rebuilds with the new choices when Launcher settings closes.
         tiles.add(tile(R.drawable.ic_home_settings, R.string.launcher_settings,
                 () -> open(new Intent(this, MainActivity.class).setAction(MainActivity.ACTION_LAUNCHER_SETTINGS))));
@@ -89,14 +97,14 @@ public final class QuickSettingsActivity extends Activity {
         for (int i = 0; i < tiles.size(); i += 2) {
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, Math.round(58 * dp), 1f);
+            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, Math.round(46 * dp), 1f);
             row.addView(tiles.get(i), half);
-            LinearLayout.LayoutParams second = new LinearLayout.LayoutParams(0, Math.round(58 * dp), 1f);
-            second.setMarginStart(Math.round(10 * dp));
+            LinearLayout.LayoutParams second = new LinearLayout.LayoutParams(0, Math.round(46 * dp), 1f);
+            second.setMarginStart(Math.round(8 * dp));
             row.addView(i + 1 < tiles.size() ? tiles.get(i + 1) : new View(this), second);
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT);
-            rowLp.bottomMargin = Math.round(10 * dp);
+            rowLp.bottomMargin = Math.round(8 * dp);
             grid.addView(row, rowLp);
         }
         firstTile = tiles.get(0);
@@ -131,20 +139,36 @@ public final class QuickSettingsActivity extends Activity {
             } catch (PackageManager.NameNotFoundException e) {
                 icon = getDrawable(R.drawable.ic_bell);
             }
-            View card = card(icon, false, n.extras.getCharSequence(Notification.EXTRA_TITLE),
+            View card = card(this, dp, icon, false, n.extras.getCharSequence(Notification.EXTRA_TITLE),
                     n.extras.getCharSequence(Notification.EXTRA_TEXT));
             String pkg = sbn.getPackageName(), key = sbn.getKey();
             PendingIntent target = n.contentIntent;
             boolean autoCancel = (n.flags & Notification.FLAG_AUTO_CANCEL) != 0;
+            boolean clearable = sbn.isClearable();
             card.setOnClickListener(v -> {
-                try {
-                    if (target != null) target.send();
-                    else open(pm.getLeanbackLaunchIntentForPackage(pkg));
-                } catch (PendingIntent.CanceledException e) {
-                    open(pm.getLeanbackLaunchIntentForPackage(pkg));
+                if (target != null) {
+                    try {
+                        target.send();
+                        if (autoCancel) GuardRevival.cancel(key);
+                        finish();
+                        return;
+                    } catch (PendingIntent.CanceledException ignored) {
+                        // its app withdrew the action: open the app itself, below
+                    }
                 }
-                if (autoCancel) GuardRevival.cancel(key);
-                finish();
+                Intent app = pm.getLeanbackLaunchIntentForPackage(pkg);
+                if (app == null) app = pm.getLaunchIntentForPackage(pkg);
+                if (app != null) {
+                    if (autoCancel) GuardRevival.cancel(key);
+                    open(app);
+                    return;
+                }
+                // Nothing to open (a notice with no action, from no app with a screen): selecting it dismisses it, as
+                // reading it is all there is to do, and the drawer stays.
+                if (clearable) {
+                    GuardRevival.cancel(key);
+                    cards.postDelayed(this::refocusAfterRefill, 300);
+                }
             });
             cards.addView(card);
         }
@@ -152,19 +176,34 @@ public final class QuickSettingsActivity extends Activity {
             TextView none = new TextView(this);
             none.setText(R.string.no_notifications);
             none.setTextColor(SUB);
-            none.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            none.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             none.setTypeface(UiFont.get(this, R.string.font_regular));
-            none.setPadding(Math.round(6 * dp), Math.round(6 * dp), 0, 0);
+            none.setPadding(Math.round(6 * dp), Math.round(2 * dp), 0, Math.round(10 * dp));
             cards.addView(none);
             return;
         }
-        View clear = card(getDrawable(R.drawable.ic_clear_all), true, getString(R.string.clear_all), null);
+        // Clear all only when something listed can be cleared: a notice its app marks as standing (ongoing, no-clear)
+        // stays whatever is pressed, and a Clear all that leaves everything in place looks broken.
+        List<String> clearable = new ArrayList<>();
+        for (int i = 0; i < list.size() && i < MAX_CARDS; i++) {
+            if (list.get(i).isClearable()) clearable.add(list.get(i).getKey());
+        }
+        if (clearable.isEmpty()) return;
+        View clear = card(this, dp, getDrawable(R.drawable.ic_clear_all), true, getString(R.string.clear_all), null);
         clear.setOnClickListener(v -> {
-            GuardRevival.clearAll();
+            for (String key : clearable) GuardRevival.cancel(key);
+            GuardRevival.clearAll();   // and any clearable one past the cards shown
             firstTile.requestFocus();
-            cards.postDelayed(this::fillCards, 400);
+            cards.postDelayed(this::fillCards, 400);   // the system takes a moment to drop them
         });
         cards.addView(clear);
+    }
+
+    /** The cards again after one went, focus on the first one left (or the first tile when none are). */
+    private void refocusAfterRefill() {
+        fillCards();
+        View first = cards.getChildCount() > 0 && cards.getChildAt(0).isFocusable() ? cards.getChildAt(0) : firstTile;
+        first.requestFocus();
     }
 
     /** A quick tile: icon and label on a rounded card that turns light when focused. */
@@ -172,71 +211,71 @@ public final class QuickSettingsActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.HORIZONTAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        int pad = Math.round(14 * dp);
+        int pad = Math.round(11 * dp);
         tile.setPadding(pad, 0, pad, 0);
-        tile.setBackground(states(CARD, CARD_FOCUSED, 16 * dp));
+        tile.setBackground(states(CARD, CARD_FOCUSED, 14 * dp));
         tile.setFocusable(true);
         tile.setClickable(true);
         ImageView image = new ImageView(this);
         image.setImageResource(icon);
         image.setImageTintList(colors(TEXT, TEXT_FOCUSED));
         image.setDuplicateParentStateEnabled(true);
-        int size = Math.round(20 * dp);
+        int size = Math.round(17 * dp);
         tile.addView(image, new LinearLayout.LayoutParams(size, size));
-        TextView text = label(getString(label), 14, R.string.font_medium, TEXT, TEXT_FOCUSED);
+        TextView text = label(this, getString(label), 12, R.string.font_medium, TEXT, TEXT_FOCUSED);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        lp.setMarginStart(Math.round(10 * dp));
+        lp.setMarginStart(Math.round(8 * dp));
         tile.addView(text, lp);
         tile.setOnClickListener(v -> action.run());
         return tile;
     }
 
     /** A notification card: the app's icon on a round badge, the title and up to two lines of text. */
-    private View card(Drawable icon, boolean tinted, CharSequence title, CharSequence text) {
-        LinearLayout card = new LinearLayout(this);
+    static View card(Context c, float dp, Drawable icon, boolean tinted, CharSequence title, CharSequence text) {
+        LinearLayout card = new LinearLayout(c);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        int pad = Math.round(12 * dp);
+        int pad = Math.round(9 * dp);
         card.setPadding(pad, pad, pad, pad);
-        card.setBackground(states(CARD, CARD_FOCUSED, 18 * dp));
+        card.setBackground(states(CARD, CARD_FOCUSED, 14 * dp));
         card.setFocusable(true);
         card.setClickable(true);
-        FrameLayout badge = new FrameLayout(this);
-        badge.setBackground(states(BADGE, BADGE_FOCUSED, 18 * dp));
+        FrameLayout badge = new FrameLayout(c);
+        badge.setBackground(states(BADGE, BADGE_FOCUSED, 14 * dp));
         badge.setDuplicateParentStateEnabled(true);
-        ImageView image = new ImageView(this);
+        ImageView image = new ImageView(c);
         image.setImageDrawable(icon);
         if (tinted) image.setImageTintList(colors(TEXT, TEXT_FOCUSED));
         image.setDuplicateParentStateEnabled(true);
-        int inner = Math.round(20 * dp);
+        int inner = Math.round(16 * dp);
         badge.addView(image, new FrameLayout.LayoutParams(inner, inner, Gravity.CENTER));
-        int outer = Math.round(36 * dp);
+        int outer = Math.round(28 * dp);
         card.addView(badge, new LinearLayout.LayoutParams(outer, outer));
-        LinearLayout texts = new LinearLayout(this);
+        LinearLayout texts = new LinearLayout(c);
         texts.setOrientation(LinearLayout.VERTICAL);
         texts.setDuplicateParentStateEnabled(true);
-        texts.addView(label(title, 14, R.string.font_medium, TEXT, TEXT_FOCUSED));
+        texts.addView(label(c, title, 12, R.string.font_medium, TEXT, TEXT_FOCUSED));
         if (!TextUtils.isEmpty(text)) {
-            TextView body = label(text, 12, R.string.font_regular, SUB, SUB_FOCUSED);
+            TextView body = label(c, text, 11, R.string.font_regular, SUB, SUB_FOCUSED);
             body.setSingleLine(false);
             body.setMaxLines(2);
             texts.addView(body);
         }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        lp.setMarginStart(Math.round(12 * dp));
+        lp.setMarginStart(Math.round(10 * dp));
         card.addView(texts, lp);
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        cardLp.bottomMargin = Math.round(10 * dp);
+        cardLp.bottomMargin = Math.round(8 * dp);
         card.setLayoutParams(cardLp);
         return card;
     }
 
-    private TextView label(CharSequence value, int sp, int font, int color, int focused) {
-        TextView text = new TextView(this);
+    static TextView label(Context c, CharSequence value, int sp, int font, int color, int focused) {
+        TextView text = new TextView(c);
         text.setText(value);
         text.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
-        text.setTypeface(UiFont.get(this, font));
+        text.setTypeface(UiFont.get(c, font));
         text.setTextColor(colors(color, focused));
         text.setSingleLine(true);
         text.setEllipsize(TextUtils.TruncateAt.END);
@@ -244,12 +283,12 @@ public final class QuickSettingsActivity extends Activity {
         return text;
     }
 
-    private static ColorStateList colors(int normal, int focused) {
+    static ColorStateList colors(int normal, int focused) {
         return new ColorStateList(new int[][]{{android.R.attr.state_focused}, {android.R.attr.state_pressed}, {}},
                 new int[]{focused, focused, normal});
     }
 
-    private static StateListDrawable states(int normal, int focused, float radius) {
+    static StateListDrawable states(int normal, int focused, float radius) {
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_focused}, round(focused, radius));
         states.addState(new int[]{android.R.attr.state_pressed}, round(focused, radius));
@@ -262,6 +301,37 @@ public final class QuickSettingsActivity extends Activity {
         shape.setColor(color);
         shape.setCornerRadius(radius);
         return shape;
+    }
+
+    /**
+     * TV Settings' accessories page at this slice address, or null when the TV has no provider there: SliceActivity
+     * exists on every Android TV and shows an empty page for an address nothing answers, so it cannot fail over.
+     */
+    private Intent accessories(String uri) {
+        String authority = android.net.Uri.parse(uri).getAuthority();
+        if (authority == null || getPackageManager().resolveContentProvider(authority, 0) == null) return null;
+        return new Intent("android.settings.SLICE_SETTINGS")
+                .putExtra("slice_uri", uri)
+                .putExtra("slice_title", getString(R.string.remotes_accessories));
+    }
+
+    /**
+     * The first of these the TV can open. Each is tried by starting it, not looked up first: on Android 11 and later a
+     * lookup can miss a settings screen the launcher is not allowed to see, while starting it still works.
+     */
+    private void openFirst(Intent... targets) {
+        for (Intent target : targets) {
+            if (target == null) continue;
+            try {
+                startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                finish();
+                return;
+            } catch (ActivityNotFoundException | SecurityException ignored) {
+                // not on this TV: the next one
+            }
+        }
+        Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        finish();
     }
 
     private void open(Intent target) {

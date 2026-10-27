@@ -326,8 +326,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                     appLabels.containsKey(pkg) ? appLabels.get(pkg) : String.valueOf(ri.loadLabel(pm)), pkg);
             if (!seen.add(pkg + '\n' + label)) continue;
             Drawable banner = null;
-            // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner.
-            if (!(uniformTiles && card == null)) {
+            // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner, except
+            // with clear_glass: there every tile, card or app, new or old, is its logo on the same glass.
+            if (!(uniformTiles && (card == null || clearGlass))) {
                 banner = bundledBanner(appBanners.get(pkg));
                 if (banner == null) banner = loadBanner(pm, ri);
             }

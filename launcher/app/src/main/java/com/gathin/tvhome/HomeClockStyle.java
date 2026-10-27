@@ -16,7 +16,7 @@ import java.util.Locale;
 final class HomeClockStyle {
     private HomeClockStyle() {}
 
-    static final float CLOCK_SP = 126f;
+    static final float CLOCK_SP = 108f;   // 126 before the weather (weather_widget) needed the room under it
     /** Horizontal squeeze of the digits: narrower, so the clock reads taller (same width as 112sp at 0.84). */
     static final float CLOCK_SCALE_X = 0.75f;
     static final float DATE_SP = 22f;

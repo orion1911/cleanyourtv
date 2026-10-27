@@ -158,4 +158,5 @@
     <string name="quick_screensaver" translatable="false">Screensaver</string>
     <string name="quick_bluetooth" translatable="false">Bluetooth</string>
     <string name="clear_all" translatable="false">Clear all</string>
+    <string name="remotes_accessories" translatable="false">Remotes &amp; Accessories</string>
 </resources>

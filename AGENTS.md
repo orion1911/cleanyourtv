@@ -232,18 +232,55 @@ look. The table is the state the person last approved.
 Tile shadow (`TileShadow`): light at rest, it follows the zoom and lift and deepens to its focused strength; the
 Holder invalidates the item on each animation frame. Unfocused logos are 25% dimmer.
 
-### To do next (checkpoint 2026-10-27, 01:24)
+### Session notes (2026-10-27 afternoon)
 
-1. **Bluetooth tile shows "feature not available".** `Settings.ACTION_BLUETOOTH_SETTINGS` does not resolve on this
-   Sony. Find what Google TV's settings use for Bluetooth / "Remotes & accessories" (`cmd package query-activities`
-   on `com.android.tv.settings`, e.g. an accessories activity) and open that from the tile instead.
-2. **Weather widget beside the clock, as in the core sample** (current temperature with an icon, place, condition,
-   high/low, and the small advice pill), with the clock made a little smaller to make room. The launcher has no
-   `INTERNET` permission by design, so weather needs either an add-on module card app (`addons/`, its own network
-   permission) or a fork-level permission change: decide with the person first.
-3. Confirm with the person that the gear button opens the new drawer (real press) and that the last build installed
-   (it finished while the connector was down).
-4. Netflix: disable or leave as it is (asked, not answered).
+- Installed: the Weather add-on (with `NowProvider`), the launcher with `WeatherWidget`, the compact drawer, and the
+  theme with `weather_widget`. The person still has to pick a city in the Weather app once.
+- Bluetooth tile: the accessory screens (`android.settings.SONYADDACCESSORYACTIVITY`, then `CONNECT_INPUT` ->
+  `AddAccessoryActivity`) require `BLUETOOTH_CONNECT`; the manifest declares it and it was granted with
+  `pm grant com.gathin.tvhome android.permission.BLUETOOTH_CONNECT` (runtime grants survive `pm install -r`; grant it
+  again after an uninstall). The "Remotes & Accessories" section itself opens through TV Settings' SliceActivity:
+  `am start -a android.settings.SLICE_SETTINGS --es slice_uri content://com.android.tv.settings.accessories.sliceprovider/general`
+  (verified: the page lists Bluetooth, Pair accessory and the paired devices). The address came from grepping
+  `TvSettingsPartner.apk`; MediaTek's `com.mediatek.tv.settings.accessories.sliceprovider` only has `/rs` (RS-232) and
+  shows a blank page for `/general`. The tile uses it only if `resolveContentProvider` finds it (the launcher's
+  `<queries>` lists `com.android.tv.settings`), then falls back to the accessory screens.
+- Drawer: a notification with no action and no app to open is dismissed when selected (if clearable). Android's own
+  non-clearable notices (package `android`, e.g. "Serial console enabled", which this firmware posts at boot) are
+  hidden, and the bell's dot counts clearable notifications only.
+- Tile long-press → App info opens TV Settings' **Apps section** (`ACTION_MANAGE_APPLICATIONS_SETTINGS` ->
+  `device.apps.AppsActivity`, square_tiles only), at the person's request. The app's own page
+  (`APPLICATION_DETAILS_SETTINGS` -> `device.apps.AppManagementActivity`) shows as a see-through split screen on this
+  firmware that looked broken; it stays the fallback. Tried and dropped: an in-launcher App info panel (an extra step
+  the person did not want) and darkening Home behind the page (no visible change). `screencap` does not show how
+  that page really looks; only the person's photos do.
+- Every tile follows the glass: with `clear_glass` a module card (the Weather add-on's tile) no longer keeps its own
+  banner but is drawn like an app, its logo on the cold glass. Apps, new installs included, never load banners in
+  uniform mode, so anything installed later gets the same tile with no theme change.
+- Builds: set `GRADLE_OPTS=-Dorg.gradle.daemon=false` for background builds. A daemon started by the build inherits
+  the job's output pipe and the job never ends (it hung twice after "Installed").
+- Test notifications: `cmd notification post -t "<title>" <tag> "<text>"` (from the shell, clearable, no action).
+
+### To do next (updated 2026-10-27, 15:25)
+
+Built, not yet on the TV (its network ADB was off; the person has to turn it back on):
+
+1. **Install** in this order: `launcher\build-and-install.ps1 -TvHost <tv ip> -HomeKeyService -RestoreKeyServices`;
+   the Weather add-on (`addons\weather`, built: push `app\build\outputs\apk\release\app-release.apk` and
+   `pm install -r`, as its README shows); then `tools\theme.ps1` (turns on `weather_widget`). Open the Weather app
+   once and pick the city (the person is in Abu Dhabi), or the widget stays hidden.
+2. **Weather widget** (decided: the add-on route, the launcher stays offline). `addons/weather` gained `NowProvider`
+   (answers the launcher only; cached reading at once, refreshed in the background when older than 30 minutes,
+   announced with notifyChange) and `Forecast.now`/`hint`/`symbol`. The launcher's `WeatherWidget` (Home header
+   and screensaver) shows symbol, temperature, place over sky and high/low, and the hint pill; the clock went to
+   108sp to make room. Check it against the sample once installed.
+3. **Drawer:** System update and Picture tiles removed (person asked for a cleaner 2x2). **Bluetooth** now tries
+   `ACTION_BLUETOOTH_SETTINGS`, then `com.google.android.intent.action.CONNECT_INPUT` (accessory pairing), then TV
+   settings. Verify on the TV which one opens (`cmd package query-activities` for both), and if Google TV has a
+   proper "Remotes & accessories" screen, put it first. **Clear all** shows only when a listed notification is
+   clearable and cancels those keys plus `cancelAllNotifications`.
+4. Confirm with a real press that the remote's gear opens the drawer.
+5. Netflix: disable or leave as it is (asked, not answered).
 
 Also changed: `WallpaperPlayer`'s crossfade (the incoming picture was added behind the opaque current one, so no fade
 showed and the change landed as a cut); `styles.xml` raises the app's shadow alphas (the tiles no longer use them,

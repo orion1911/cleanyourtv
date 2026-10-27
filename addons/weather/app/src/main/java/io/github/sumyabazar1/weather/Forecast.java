@@ -137,6 +137,106 @@ final class Forecast {
     }
 
     /**
+     * What the launcher's header shows (NowProvider): the weather now, today's high and low, and the next 12 hours
+     * (local times as Open-Meteo gives them, "2026-10-27T22:00"), from which {@link #hint} picks the pill.
+     */
+    static final class Now {
+        final double tempC;
+        final int code;
+        final boolean day;
+        final double highC, lowC;
+        final double[] hourC;
+        final double[] hourRainMm;
+        final String[] hourTime;
+
+        Now(double tempC, int code, boolean day, double highC, double lowC, double[] hourC, double[] hourRainMm,
+            String[] hourTime) {
+            this.tempC = tempC;
+            this.code = code;
+            this.day = day;
+            this.highC = highC;
+            this.lowC = lowC;
+            this.hourC = hourC;
+            this.hourRainMm = hourRainMm;
+            this.hourTime = hourTime;
+        }
+    }
+
+    /** One light call for {@link Now}: no air quality, no forecast days. */
+    static Now now(double latitude, double longitude) throws IOException, JSONException {
+        String where = String.format(Locale.ROOT, "latitude=%.4f&longitude=%.4f", latitude, longitude);
+        JSONObject reply = get("https://api.open-meteo.com/v1/forecast?" + where + "&models=icon_seamless"
+                + "&current=temperature_2m,relative_humidity_2m,weather_code,is_day"
+                + "&daily=temperature_2m_max,temperature_2m_min"
+                + "&hourly=temperature_2m,precipitation&forecast_hours=12&timezone=auto&forecast_days=1");
+        JSONObject current = reply.getJSONObject("current");
+        double temp = current.getDouble("temperature_2m");
+        int code = snowIfCold(current.getInt("weather_code"), temp, current.getDouble("relative_humidity_2m"));
+        JSONObject daily = reply.getJSONObject("daily");
+        double high = daily.getJSONArray("temperature_2m_max").optDouble(0, temp);
+        double low = daily.getJSONArray("temperature_2m_min").optDouble(0, temp);
+        JSONObject hourly = reply.getJSONObject("hourly");
+        JSONArray times = hourly.getJSONArray("time");
+        JSONArray temps = hourly.getJSONArray("temperature_2m");
+        JSONArray rain = hourly.getJSONArray("precipitation");
+        int n = times.length();
+        double[] hourC = new double[n], hourRain = new double[n];
+        String[] hourTime = new String[n];
+        for (int i = 0; i < n; i++) {
+            hourTime[i] = times.getString(i);
+            hourC[i] = temps.isNull(i) ? temp : temps.getDouble(i);
+            hourRain[i] = rain.isNull(i) ? 0 : rain.getDouble(i);
+        }
+        return new Now(temp, code, current.getInt("is_day") == 1, high, low, hourC, hourRain, hourTime);
+    }
+
+    /**
+     * The header pill: what to wear or carry over the next 12 hours, then how the temperature turns ("Light jacket ·
+     * cools to 24° by 22:00"). Null when there is nothing worth saying.
+     */
+    static String hint(android.content.Context c, Now now, boolean fahrenheit) {
+        double minC = now.tempC, maxC = now.tempC;
+        int minAt = -1, maxAt = -1;
+        boolean wet = false;
+        for (int i = 0; i < now.hourC.length; i++) {
+            if (now.hourC[i] < minC) { minC = now.hourC[i]; minAt = i; }
+            if (now.hourC[i] > maxC) { maxC = now.hourC[i]; maxAt = i; }
+            if (now.hourRainMm[i] >= 0.2) wet = true;
+        }
+        String advice = wet ? c.getString(R.string.hint_umbrella)
+                : minC < 5 ? c.getString(R.string.hint_warm_coat)
+                : minC < 12 ? c.getString(R.string.hint_jacket)
+                : minC < 18 ? c.getString(R.string.hint_light_jacket)
+                : maxC >= 36 ? c.getString(R.string.hint_stay_cool) : null;
+        String change = null;
+        if (minAt >= 0 && now.tempC - minC >= 3) {
+            change = c.getString(R.string.hint_cools, degrees(minC, fahrenheit), hourLabel(c, now.hourTime[minAt]));
+        } else if (maxAt >= 0 && maxC - now.tempC >= 3) {
+            change = c.getString(R.string.hint_warms, degrees(maxC, fahrenheit), hourLabel(c, now.hourTime[maxAt]));
+        }
+        if (advice == null) return change;
+        return change == null ? advice : advice + " · " + change;
+    }
+
+    /** "22:00" or "10 PM", as the TV keeps time. */
+    private static String hourLabel(android.content.Context c, String isoLocal) {
+        java.time.LocalTime time = java.time.LocalDateTime.parse(isoLocal).toLocalTime();
+        boolean h24 = android.text.format.DateFormat.is24HourFormat(c);
+        return time.format(java.time.format.DateTimeFormatter.ofPattern(h24 ? "HH:mm" : "h a", Locale.getDefault()));
+    }
+
+    /** A small symbol name for the launcher to draw: sun, moon, partly, cloud, fog, rain, snow or storm. */
+    static String symbol(int code, boolean day) {
+        if (code == 0 || code == 1) return day ? "sun" : "moon";
+        if (code == 2) return "partly";
+        if (code == 45 || code == 48) return "fog";
+        if (code >= 95) return "storm";
+        if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "snow";
+        if (code >= 51) return "rain";
+        return "cloud";
+    }
+
+    /**
      * The models type precipitation by the air temperature, and around freezing they call rain what reaches the
      * ground as snow (ICON and GFS: "light rain" at 1 °C in a Ulaanbaatar blizzard). The wet-bulb temperature,
      * which counts how dry the air is, decides better: at 1 °C or below, rain and drizzle become snow of the same
